@@ -14,6 +14,7 @@ from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.cache import fla_cache_autotune
 from fla.ops.utils.op import exp2
 from fla.utils import (
+    IS_NVIDIA_BLACKWELL,
     IS_NVIDIA_HOPPER,
     TRITON_ABOVE_3_4_0,
     TRITON_ABOVE_3_7_1,
@@ -24,6 +25,13 @@ from fla.utils import (
 BKV_LIST = [64, 128] if check_shared_mem() else ([32, 64] if check_shared_mem('ada') else [32])
 NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8]
 
+# TODO: Triton mainline fixes a Blackwell tl.dot recurrence race.
+# Keep this kernel off its 8-warp (BK=BV=128) config for Blackwell until Triton 3.8
+# is released and we re-validate the wider config space.
+CHUNK_FWD_O_BLACKWELL_DROPPED_CONFIGS = [] if IS_NVIDIA_BLACKWELL else [
+    triton.Config({'BK': 128, 'BV': 128}, num_warps=8, num_stages=3),
+]
+
 
 @triton.heuristics({
     'USE_G': lambda args: args['g'] is not None,
@@ -32,7 +40,7 @@ NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8]
 })
 @fla_cache_autotune(
     configs=[
-        triton.Config({'BK': 128, 'BV': 128}, num_warps=8, num_stages=3),
+        *CHUNK_FWD_O_BLACKWELL_DROPPED_CONFIGS,
         triton.Config({'BK': 64, 'BV': 64}, num_warps=4, num_stages=3),
         triton.Config({'BK': 32, 'BV': 32}, num_warps=2, num_stages=3),
     ],
